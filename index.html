@@ -38,7 +38,7 @@
                     </div>
                     <div>
                         <h1 class="text-xl font-bold tracking-tight">Laporan Guru</h1>
-                        <p class="text-xs text-indigo-200">Sistem Informasi Absensi & Jurnal Mengajar (Cloud Sync)</p>
+                        <p class="text-xs text-indigo-200" id="app-mode-subtitle">Sistem Informasi Absensi & Jurnal Mengajar</p>
                     </div>
                 </div>
                 <div class="flex items-center space-x-4">
@@ -46,7 +46,7 @@
                         <i class="fa-regular fa-calendar-days mr-2"></i>
                         <span id="live-date">Jumat, 26 Juni 2026</span>
                     </span>
-                    <!-- Tombol Reset Database Cloud telah dipindahkan sepenuhnya ke pengaturan admin -->
+                    <!-- Tombol Reset Database Cloud telah dipindahkan sepenuhnya ke pengaturan keamanan admin -->
                 </div>
             </div>
         </div>
@@ -761,18 +761,17 @@
 
         // --- CLOUD FIREBASE INITIALIZATION ---
         const firebaseConfig = typeof __firebase_config !== 'undefined' ? JSON.parse(__firebase_config) : {
-            apiKey: "",
-            authDomain: "",
-            projectId: "",
-            storageBucket: "",
-            messagingSenderId: "",
-            appId: ""
+            apiKey: "AIzaSyDdByN2S6MF20N93psU0dR8K5Q1PUSmD5g",
+            authDomain: "laporan-harian-guru.firebaseapp.com",
+            projectId: "laporan-harian-guru",
+            storageBucket: "laporan-harian-guru.firebasestorage.app",
+            messagingSenderId: "781797572922",
+            appId: "1:781797572922:web:a333bafa862e80d73b1003"
         };
         const appId = typeof __app_id !== 'undefined' ? __app_id : 'laporan-guru-app';
 
-        const app = initializeApp(firebaseConfig);
-        const auth = getAuth(app);
-        const db = getFirestore(app);
+        // DETEKSI APAKAH FIREBASE SUDAH DIKONFIGURASI
+        const hasFirebase = firebaseConfig && firebaseConfig.apiKey && firebaseConfig.apiKey.trim() !== "";
 
         // State mutabel lokal yang tersinkronisasi awan
         let masterStudents = {};
@@ -789,52 +788,73 @@
         
         // =========================================================================
         // PASSWORD ADMIN PERMANEN: Agusganteng123
-        // (Ingat kata sandi ini jika Anda ingin mengonfigurasi atau mengatur ulang data)
         // =========================================================================
         const adminPassword = "Agusganteng123";
         let isAdminAuthenticated = false; 
         let currentUser = null;
 
-        // Simulated Storage Keys
         const STORAGE_KEY_SIDEBAR = "laporan_guru_sidebar_collapsed";
+        const STORAGE_KEY_ABSENSI = "laporan_guru_absensi_v1";
+        const STORAGE_KEY_JURNAL = "laporan_guru_jurnal_v1";
+        const STORAGE_KEY_MASTER_STUDENTS = "laporan_guru_master_students_v1";
+        const STORAGE_KEY_MASTER_WALAS = "laporan_guru_master_walas_v1";
+        const STORAGE_KEY_MASTER_TEACHERS = "laporan_guru_master_teachers_v1";
 
-        // AUTHENTICATION ON LOAD (RULE 3)
-        const initAuth = async () => {
+        let db, auth;
+
+        // JIKA ADA FIREBASE, INITIALIZE
+        if (hasFirebase) {
+            document.getElementById("app-mode-subtitle").innerText = "Sistem Informasi Absensi & Jurnal Mengajar (Cloud Sync)";
+            
             try {
-                if (typeof __initial_auth_token !== 'undefined' && __initial_auth_token) {
-                    await signInWithCustomToken(auth, __initial_auth_token);
-                } else {
-                    await signInAnonymously(auth);
-                }
-            } catch (e) {
-                console.error("Auth error:", e);
-                try {
-                    await signInAnonymously(auth);
-                } catch (err) {
-                    console.error("Anonymous auth fallback failed:", err);
-                }
-            }
-        };
-        initAuth();
+                const app = initializeApp(firebaseConfig);
+                auth = getAuth(app);
+                db = getFirestore(app);
 
-        onAuthStateChanged(auth, (user) => {
-            currentUser = user;
-            updateSidebarLockUI();
-            if (user) {
-                // Berhasil login -> Langsung hubungkan pendengar sinkronisasi real-time
-                setupFirestoreListeners();
-            }
-        });
+                const initAuth = async () => {
+                    try {
+                        if (typeof __initial_auth_token !== 'undefined' && __initial_auth_token) {
+                            await signInWithCustomToken(auth, __initial_auth_token);
+                        } else {
+                            await signInAnonymously(auth);
+                        }
+                    } catch (e) {
+                        console.error("Auth error:", e);
+                        try {
+                            await signInAnonymously(auth);
+                        } catch (err) {
+                            console.error("Anonymous auth fallback failed:", err);
+                        }
+                    }
+                };
+                initAuth();
 
-        // FIRESTORE REAL-TIME LISTENERS (SINKRONISASI OTOMATIS ANTAR GURU)
+                onAuthStateChanged(auth, (user) => {
+                    currentUser = user;
+                    updateSidebarLockUI();
+                    if (user) {
+                        setupFirestoreListeners();
+                    }
+                });
+            } catch (err) {
+                console.error("Firebase initialization failed:", err);
+            }
+        } else {
+            // MODE DEMO OFFLINE
+            document.getElementById("app-mode-subtitle").innerText = "Sistem Informasi Absensi & Jurnal Mengajar (Mode Demo - Offline)";
+            setTimeout(() => {
+                showToast("Aplikasi berjalan dalam Mode Demo (Offline). Hubungkan Firebase untuk mengaktifkan Cloud Sync.", "info");
+            }, 1000);
+        }
+
+        // FIRESTORE REAL-TIME LISTENERS
         let unsubscribeAbsensi = null;
         let unsubscribeJurnal = null;
         let unsubscribeConfig = null;
 
         function setupFirestoreListeners() {
-            if (!currentUser) return;
+            if (!currentUser || !hasFirebase) return;
 
-            // Strict paths (RULE 1)
             const absCol = collection(db, 'artifacts', appId, 'public', 'data', 'absensi');
             const jurCol = collection(db, 'artifacts', appId, 'public', 'data', 'jurnal');
             const configDoc = doc(db, 'artifacts', appId, 'public', 'data', 'config', 'master_data');
@@ -843,7 +863,6 @@
             if (unsubscribeJurnal) unsubscribeJurnal();
             if (unsubscribeConfig) unsubscribeConfig();
 
-            // 1. Sinkronisasi Data Absensi Walas
             unsubscribeAbsensi = onSnapshot(absCol, (snapshot) => {
                 absensiRecords = [];
                 snapshot.forEach(doc => {
@@ -854,7 +873,6 @@
                 console.error("Absensi listener error:", error);
             });
 
-            // 2. Sinkronisasi Data Jurnal Guru
             unsubscribeJurnal = onSnapshot(jurCol, (snapshot) => {
                 jurnalRecords = [];
                 snapshot.forEach(doc => {
@@ -865,7 +883,6 @@
                 console.error("Jurnal listener error:", error);
             });
 
-            // 3. Sinkronisasi Struktur Data Master (Murid, Kelas, Guru, Jam Pelajaran)
             unsubscribeConfig = onSnapshot(configDoc, (snapshot) => {
                 if (snapshot.exists()) {
                     const data = snapshot.data();
@@ -874,7 +891,6 @@
                     masterTeacherSubjects = data.teacherSubjects || { ...DEFAULT_TEACHER_SUBJECTS };
                     masterTeachingHours = data.teachingHours || [...DEFAULT_TEACHING_HOURS];
                 } else {
-                    // Preload database awan pertama kali jika kosong
                     masterStudents = { ...DEFAULT_STUDENTS };
                     masterClassWalas = { ...DEFAULT_CLASS_WALAS };
                     masterTeacherSubjects = { ...DEFAULT_TEACHER_SUBJECTS };
@@ -894,8 +910,12 @@
             });
         }
 
-        // SAVE MASTER DATA TO FIRESTORE (RULE 1)
+        // SAVE MASTER DATA TO FIRESTORE / LOCAL STORAGE FALLBACK
         async function saveMasterDataToFirestore() {
+            if (!hasFirebase) {
+                saveStateToLocalStorage();
+                return;
+            }
             if (!currentUser) return;
             try {
                 const configDoc = doc(db, 'artifacts', appId, 'public', 'data', 'config', 'master_data');
@@ -911,32 +931,68 @@
             }
         }
 
+        // LOAD LOCAL STORAGE DATA (DEMO MODE)
+        function loadStateFromLocalStorage() {
+            const savedAbsensi = localStorage.getItem(STORAGE_KEY_ABSENSI);
+            const savedJurnal = localStorage.getItem(STORAGE_KEY_JURNAL);
+            const savedSidebar = localStorage.getItem(STORAGE_KEY_SIDEBAR);
+            
+            if (savedAbsensi) absensiRecords = JSON.parse(savedAbsensi);
+            if (savedJurnal) jurnalRecords = JSON.parse(savedJurnal);
+            if (savedSidebar !== null) sidebarCollapsed = savedSidebar === "true";
+
+            if (!hasFirebase) {
+                const savedMasterStudents = localStorage.getItem(STORAGE_KEY_MASTER_STUDENTS);
+                const savedMasterWalas = localStorage.getItem(STORAGE_KEY_MASTER_WALAS);
+                const savedMasterTeachers = localStorage.getItem(STORAGE_KEY_MASTER_TEACHERS);
+                const savedMasterHours = localStorage.getItem("laporan_guru_master_hours");
+                
+                masterStudents = savedMasterStudents ? JSON.parse(savedMasterStudents) : { ...DEFAULT_STUDENTS };
+                masterClassWalas = savedMasterWalas ? JSON.parse(savedMasterWalas) : { ...DEFAULT_CLASS_WALAS };
+                masterTeacherSubjects = savedMasterTeachers ? JSON.parse(savedMasterTeachers) : { ...DEFAULT_TEACHER_SUBJECTS };
+                masterTeachingHours = savedMasterHours ? JSON.parse(savedMasterHours) : [...DEFAULT_TEACHING_HOURS];
+            }
+        }
+
+        // SAVE LOCAL STORAGE DATA (DEMO MODE)
+        function saveStateToLocalStorage() {
+            localStorage.setItem(STORAGE_KEY_ABSENSI, JSON.stringify(absensiRecords));
+            localStorage.setItem(STORAGE_KEY_JURNAL, JSON.stringify(jurnalRecords));
+            if (!hasFirebase) {
+                localStorage.setItem(STORAGE_KEY_MASTER_STUDENTS, JSON.stringify(masterStudents));
+                localStorage.setItem(STORAGE_KEY_MASTER_WALAS, JSON.stringify(masterClassWalas));
+                localStorage.setItem(STORAGE_KEY_MASTER_TEACHERS, JSON.stringify(masterTeacherSubjects));
+                localStorage.setItem("laporan_guru_master_hours", JSON.stringify(masterTeachingHours));
+            }
+        }
+
         window.onload = function() {
-            // Set current formatted date in UI
             const today = new Date();
             const options = { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' };
             document.getElementById('live-date').innerText = today.toLocaleDateString('id-ID', options);
             
-            // Set input default date values to today (YYYY-MM-DD format)
             const dateStr = today.toISOString().split('T')[0];
             document.getElementById('walas-date').value = dateStr;
             document.getElementById('jurnal-date').value = dateStr;
             
-            // Set defaults for filter range (current month)
             const firstDay = new Date(today.getFullYear(), today.getMonth(), 1).toISOString().split('T')[0];
             document.getElementById('rekap-absensi-start').value = firstDay;
             document.getElementById('rekap-absensi-end').value = dateStr;
 
-            // Load Sidebar Collapse State locally
-            const savedSidebar = localStorage.getItem(STORAGE_KEY_SIDEBAR);
-            if (savedSidebar !== null) {
-                sidebarCollapsed = savedSidebar === "true";
-            }
+            loadStateFromLocalStorage();
             applySidebarState();
             updateSidebarLockUI();
+
+            if (!hasFirebase) {
+                populateAllDropdowns();
+                renderAbsensiTable();
+                renderJurnalTimeline();
+                renderSettingKelasTable();
+                renderSettingTeachersList();
+            }
         }
 
-        // Populate dropdowns in both views and settings dynamically from master state
+        // Populate dropdowns
         function populateAllDropdowns() {
             const classes = Object.keys(masterStudents).sort();
             const teachers = Object.keys(masterTeacherSubjects).sort();
@@ -1033,7 +1089,6 @@
             const menuBtns = document.querySelectorAll(".menu-btn");
 
             if (sidebarCollapsed) {
-                // --- ON MINIMIZED / COLLAPSED STATE ---
                 sidebar.classList.remove("lg:w-64");
                 sidebar.classList.add("lg:w-20");
                 sidebarTitle.classList.add("lg:opacity-0", "lg:pointer-events-none");
@@ -1051,7 +1106,6 @@
                 sidebarItems.classList.add("hidden", "lg:block");
                 toggleIcon.className = "fa-solid fa-chevron-right w-4 h-4 flex items-center justify-center";
             } else {
-                // --- ON EXPANDED STATE ---
                 sidebar.classList.remove("lg:w-20");
                 sidebar.classList.add("lg:w-64");
                 sidebarTitle.classList.remove("lg:opacity-0", "lg:pointer-events-none");
@@ -1071,33 +1125,55 @@
             }
         }
 
-        // Reset all data to blank state (or simulated default)
+        // Reset all data
         async function resetData() {
             showConfirm(
-                "Reset Database Cloud",
-                "Apakah Anda yakin ingin mengatur ulang data? Semua data absensi, jurnal, dan pengaturan kustom Anda di Cloud akan dikembalikan ke data simulasi default.",
+                "Reset Database",
+                "Apakah Anda yakin ingin mengatur ulang data? Semua data transaksi dan pengaturan kustom akan dikembalikan ke data simulasi default.",
                 async () => {
+                    if (!hasFirebase) {
+                        // LOCAL RESET FALLBACK
+                        absensiRecords = [];
+                        jurnalRecords = [];
+                        masterStudents = { ...DEFAULT_STUDENTS };
+                        masterClassWalas = { ...DEFAULT_CLASS_WALAS };
+                        masterTeacherSubjects = { ...DEFAULT_TEACHER_SUBJECTS };
+                        masterTeachingHours = [...DEFAULT_TEACHING_HOURS];
+                        
+                        saveStateToLocalStorage();
+                        populateAllDropdowns();
+                        renderAbsensiTable();
+                        renderJurnalTimeline();
+                        renderSettingKelasTable();
+                        renderSettingTeachersList();
+                        
+                        document.getElementById('walas-class').value = "";
+                        document.getElementById('walas-name').value = "";
+                        loadStudentsForWalas("");
+                        
+                        showToast("Database lokal berhasil diatur ulang ke default!", "success");
+                        return;
+                    }
+
                     if (!currentUser) {
                         showToast("Sesi tidak aktif. Hubungkan ke jaringan.", "error");
                         return;
                     }
+
                     try {
                         const absCol = collection(db, 'artifacts', appId, 'public', 'data', 'absensi');
                         const jurCol = collection(db, 'artifacts', appId, 'public', 'data', 'jurnal');
 
-                        // Ambil dan hapus absensi
                         const absSnap = await getDocs(absCol);
                         for (const d of absSnap.docs) {
                             await deleteDoc(doc(db, 'artifacts', appId, 'public', 'data', 'absensi', d.id));
                         }
 
-                        // Ambil dan hapus jurnal
                         const jurSnap = await getDocs(jurCol);
                         for (const d of jurSnap.docs) {
                             await deleteDoc(doc(db, 'artifacts', appId, 'public', 'data', 'jurnal', d.id));
                         }
 
-                        // Reset config ke default
                         masterStudents = { ...DEFAULT_STUDENTS };
                         masterClassWalas = { ...DEFAULT_CLASS_WALAS };
                         masterTeacherSubjects = { ...DEFAULT_TEACHER_SUBJECTS };
@@ -1113,45 +1189,37 @@
             );
         }
 
-        // Navigates views
+        // Switch View
         function switchView(viewId) {
-            // SECURITY CHECK: Intercept Pengaturan if not authenticated
             if (viewId === 'pengaturan' && !isAdminAuthenticated) {
                 openAdminAuthModal();
                 return;
             }
 
-            // Hide all panels
             const panels = document.querySelectorAll(".view-panel");
             panels.forEach(panel => panel.classList.add("hidden"));
 
-            // Remove active classes from navigation menu buttons
             const navButtons = document.querySelectorAll(".menu-btn");
             navButtons.forEach(btn => {
-                // Base style for buttons
                 btn.className = "menu-btn w-full flex items-center rounded-xl transition duration-200 group text-slate-600 hover:bg-slate-50";
                 
-                // Read current alignment classes
                 if (sidebarCollapsed) {
                     btn.classList.add("lg:justify-center", "py-3");
                 } else {
                     btn.classList.add("space-x-3", "px-4", "py-3");
                 }
 
-                // Restore generic secondary icon wrapper colors
                 const iconSpan = btn.querySelector("span:first-child");
                 if (iconSpan) {
                     iconSpan.className = "p-1.5 rounded-lg bg-slate-100 text-slate-500 group-hover:bg-indigo-100 group-hover:text-indigo-600 transition flex-shrink-0";
                 }
             });
 
-            // Reveal chosen panel
             const targetPanel = document.getElementById(`view-${viewId}`);
             if (targetPanel) {
                 targetPanel.classList.remove("hidden");
             }
 
-            // Highlight the active navigation button
             const activeBtn = document.getElementById(`btn-${viewId}`);
             if (activeBtn) {
                 activeBtn.className = "menu-btn w-full flex items-center rounded-xl transition duration-200 group bg-indigo-50 text-indigo-700 font-semibold";
@@ -1168,7 +1236,6 @@
                 }
             }
 
-            // Perform context-specific updates on view changes
             if (viewId === "rekap-absensi") {
                 renderAbsensiTable();
             } else if (viewId === "rekap-jurnal") {
@@ -1181,15 +1248,11 @@
         /* ----------------------------------------------------
            PART B & D: ABSENSI WALAS LOGIC
            ---------------------------------------------------- */
-
-        // Handles class change on Walas form: Auto-fills Walas name and loads student list
         function handleWalasClassChange(kelas) {
             const nameInput = document.getElementById("walas-name");
             
-            // Auto-fill Walas name using predefined dictionary mapping
             if (masterClassWalas[kelas]) {
                 nameInput.value = masterClassWalas[kelas];
-                // Visual feedback
                 nameInput.classList.remove("bg-slate-100", "text-slate-700");
                 nameInput.classList.add("bg-indigo-50", "text-indigo-900", "font-semibold");
             } else {
@@ -1198,14 +1261,12 @@
                 nameInput.classList.add("bg-slate-100", "text-slate-700");
             }
 
-            // Load students roster
             loadStudentsForWalas(kelas);
         }
 
-        // Loads class list for Walas dynamically
         function loadStudentsForWalas(kelas) {
             const container = document.getElementById("walas-student-container");
-            container.innerHTML = ""; // reset
+            container.innerHTML = "";
 
             const studentsList = masterStudents[kelas];
             if (!studentsList || studentsList.length === 0) {
@@ -1261,7 +1322,6 @@
             });
         }
 
-        // Handles submissions of Homeroom Attendance Form (SAVES TO FIRESTORE)
         async function handleSaveAbsensiWalas(event) {
             event.preventDefault();
             
@@ -1287,34 +1347,46 @@
                 studentRecords.push({ name: student, status: status });
             });
 
-            if (!currentUser) {
-                showToast("Koneksi Cloud terputus. Gagal menyimpan.", "error");
-                return;
-            }
+            const newRecord = {
+                date: date,
+                walas: walasName,
+                kelas: kelas,
+                students: studentRecords
+            };
 
-            try {
-                // Strict path format (RULE 1)
-                const docRef = doc(db, 'artifacts', appId, 'public', 'data', 'absensi', `${date}_${kelas}`);
-                await setDoc(docRef, {
-                    date: date,
-                    walas: walasName,
-                    kelas: kelas,
-                    students: studentRecords
-                });
-                showToast("Laporan absensi berhasil disinkronkan ke Cloud!", "success");
-            } catch (err) {
-                console.error("Firestore Save Error:", err);
-                showToast("Gagal menyimpan ke Cloud database.", "error");
-                return;
+            if (!hasFirebase) {
+                // LOCAL STORAGE FALLBACK
+                const existingIndex = absensiRecords.findIndex(r => r.date === date && r.kelas === kelas);
+                if (existingIndex !== -1) {
+                    absensiRecords[existingIndex] = { id: absensiRecords[existingIndex].id || `abs_${Date.now()}`, ...newRecord };
+                } else {
+                    absensiRecords.push({ id: `abs_${Date.now()}`, ...newRecord });
+                }
+                saveStateToLocalStorage();
+                renderAbsensiTable();
+                showToast("Laporan absensi disimpan (Mode Demo/Lokal)!", "success");
+            } else {
+                // CLOUD SINKRONISASI
+                if (!currentUser) {
+                    showToast("Koneksi Cloud terputus. Gagal menyimpan.", "error");
+                    return;
+                }
+                try {
+                    const docRef = doc(db, 'artifacts', appId, 'public', 'data', 'absensi', `${date}_${kelas}`);
+                    await setDoc(docRef, newRecord);
+                    showToast("Laporan absensi berhasil disinkronkan ke Cloud!", "success");
+                } catch (err) {
+                    console.error("Firestore Save Error:", err);
+                    showToast("Gagal menyimpan ke Cloud database.", "error");
+                    return;
+                }
             }
             
-            // Clean/Reset form & inputs
             document.getElementById("form-walas").reset();
             const nameInput = document.getElementById("walas-name");
             nameInput.classList.remove("bg-indigo-50", "text-indigo-900", "font-semibold");
             nameInput.classList.add("bg-slate-100", "text-slate-700");
 
-            // Reset date input back to today
             document.getElementById('walas-date').value = new Date().toISOString().split('T')[0];
             document.getElementById("walas-student-container").innerHTML = `
                 <div class="text-center py-8 text-slate-400 bg-slate-50 rounded-xl border border-dashed border-slate-300">
@@ -1323,13 +1395,11 @@
                 </div>
             `;
             
-            // Auto switch to Rekap panel so teachers can check their submission
             setTimeout(() => {
                 switchView("rekap-absensi");
             }, 600);
         }
 
-        // Sets the active view mode (Harian vs Per Siswa)
         function setAbsensiViewMode(mode) {
             absensiViewMode = mode;
             const tabHarian = document.getElementById("tab-absensi-harian");
@@ -1345,26 +1415,22 @@
             renderAbsensiTable();
         }
 
-        // Render Absensi Walas table on Rekap panel (with date, class, & view mode filters)
         function renderAbsensiTable() {
             const headerRow = document.getElementById("rekap-absensi-table-header-row");
             const tbody = document.getElementById("rekap-absensi-table-body");
             const noMsg = document.getElementById("no-rekap-absensi-msg");
             
+            if (!tbody || !headerRow) return;
             tbody.innerHTML = "";
 
             let recordsToRender = [...absensiRecords];
-
-            // Sort newest date first
             recordsToRender.sort((a, b) => new Date(b.date) - new Date(a.date));
 
-            // Apply Class Filter (RULE 2: Client-side filter)
             const classFilter = document.getElementById("rekap-absensi-class-filter").value;
             if (classFilter) {
                 recordsToRender = recordsToRender.filter(record => record.kelas === classFilter);
             }
 
-            // Apply Range Filter (Tanggal)
             const startDate = document.getElementById("rekap-absensi-start").value;
             const endDate = document.getElementById("rekap-absensi-end").value;
 
@@ -1374,9 +1440,7 @@
                 });
             }
 
-            // CHECK VIEW MODE
             if (absensiViewMode === "harian") {
-                // RENDER DAILY LIST
                 headerRow.innerHTML = `
                     <th class="px-6 py-3.5 font-bold">Tanggal</th>
                     <th class="px-6 py-3.5 font-bold">Wali Kelas</th>
@@ -1399,7 +1463,6 @@
                     const tr = document.createElement("tr");
                     tr.className = "hover:bg-slate-50 transition duration-150";
 
-                    // Format status badge count
                     let statusSummary = "";
                     const counts = { Hadir: 0, Izin: 0, Sakit: 0, Alpa: 0 };
                     record.students.forEach(s => counts[s.status] = (counts[s.status] || 0) + 1);
@@ -1425,7 +1488,6 @@
                     tbody.appendChild(tr);
                 });
             } else {
-                // RENDER ACCUMULATED STUDENT REPORT
                 headerRow.innerHTML = `
                     <th class="px-6 py-3.5 font-bold">No</th>
                     <th class="px-6 py-3.5 font-bold">Nama Siswa</th>
@@ -1457,13 +1519,11 @@
 
                 noMsg.classList.add("hidden");
 
-                // Initialize Accumulators for all students in this class
                 const studentSummary = {};
                 studentsList.forEach(student => {
                     studentSummary[student] = { Hadir: 0, Izin: 0, Sakit: 0, Alpa: 0 };
                 });
 
-                // Accumulate status counts across filtered records
                 recordsToRender.forEach(record => {
                     record.students.forEach(s => {
                         if (studentSummary[s.name] !== undefined) {
@@ -1506,13 +1566,11 @@
             }
         }
 
-        // Apply filters
         function applyAbsensiFilter() {
             renderAbsensiTable();
             showToast("Filter absensi berhasil diterapkan!", "info");
         }
 
-        // Clear filter settings
         function clearAbsensiFilter() {
             const today = new Date();
             const firstDay = new Date(today.getFullYear(), today.getMonth(), 1).toISOString().split('T')[0];
@@ -1526,7 +1584,6 @@
             showToast("Atur ulang filter absensi berhasil.", "info");
         }
 
-        // Generates and downloads a beautiful CSV of the attendance (taking the current filter into account)
         function downloadAbsensiCSV() {
             if (absensiRecords.length === 0) {
                 showToast("Tidak ada data absensi untuk diekspor!", "error");
@@ -1534,14 +1591,11 @@
             }
 
             let recordsToExport = [...absensiRecords];
-            
-            // Apply Class Filter (RULE 2)
             const classFilter = document.getElementById("rekap-absensi-class-filter").value;
             if (classFilter) {
                 recordsToExport = recordsToExport.filter(r => r.kelas === classFilter);
             }
 
-            // Apply Date Range Filter (RULE 2)
             const startDate = document.getElementById("rekap-absensi-start").value;
             const endDate = document.getElementById("rekap-absensi-end").value;
             if (startDate && endDate) {
@@ -1553,7 +1607,6 @@
                 return;
             }
 
-            // CSV Building
             let csvContent = "data:text/csv;charset=utf-8,";
             
             if (absensiViewMode === "harian") {
@@ -1565,7 +1618,6 @@
                     });
                 });
             } else {
-                // Student Summary CSV Export
                 if (!classFilter) {
                     showToast("Silakan pilih kelas terlebih dahulu untuk mengunduh rekap per siswa!", "error");
                     return;
@@ -1599,7 +1651,6 @@
                 });
             }
 
-            // Downloader Logic
             const encodedUri = encodeURI(csvContent);
             const downloadLink = document.createElement("a");
             downloadLink.setAttribute("href", encodedUri);
@@ -1618,11 +1669,9 @@
         /* ----------------------------------------------------
            PART C & E: JURNAL MENGAJAR GURU LOGIC
            ---------------------------------------------------- */
-
-        // Handler to dynamically alter subjects according to the chosen teacher
         function handleTeacherChange(teacherName) {
             const subjectSelect = document.getElementById("jurnal-subject");
-            subjectSelect.innerHTML = ""; // reset
+            subjectSelect.innerHTML = "";
 
             const subjects = masterTeacherSubjects[teacherName];
             if (!subjects || subjects.length === 0) {
@@ -1638,10 +1687,10 @@
             });
         }
 
-        // Live Character Counter Updater
         function updateCharCount(id, counterId) {
             const textarea = document.getElementById(id);
             const counter = document.getElementById(counterId);
+            if (!textarea || !counter) return;
             const length = textarea.value.length;
             counter.innerText = `${length} / 300 karakter`;
             
@@ -1654,10 +1703,9 @@
             }
         }
 
-        // Load classroom student roster for Journal inputs
         function loadStudentsForJurnal(kelas) {
             const container = document.getElementById("jurnal-student-container");
-            container.innerHTML = ""; // reset
+            container.innerHTML = "";
 
             const studentsList = masterStudents[kelas];
             if (!studentsList || studentsList.length === 0) {
@@ -1713,7 +1761,6 @@
             });
         }
 
-        // Submit and save Teaching Journal (SAVES TO FIRESTORE)
         async function handleSaveJurnal(event) {
             event.preventDefault();
 
@@ -1730,6 +1777,11 @@
                 return;
             }
 
+            if (notes.length > 300 || tasks.length > 300) {
+                showToast("Catatan kegiatan atau tugas melebihi 300 karakter!", "error");
+                return;
+            }
+
             const studentsList = masterStudents[kelas];
             if (!studentsList || studentsList.length === 0) {
                 showToast("Daftar siswa kosong! Tambahkan murid terlebih dahulu di menu Pengaturan.", "error");
@@ -1743,37 +1795,44 @@
                 studentRecords.push({ name: student, status: status });
             });
 
-            if (!currentUser) {
-                showToast("Koneksi Cloud terputus. Gagal menyimpan.", "error");
-                return;
+            const newJurnal = {
+                date: date,
+                teacher: teacher,
+                subject: subject,
+                kelas: kelas,
+                hours: hours,
+                notes: notes,
+                tasks: tasks || "Tidak ada tugas",
+                students: studentRecords
+            };
+
+            if (!hasFirebase) {
+                // LOCAL STORAGE FALLBACK
+                jurnalRecords.push({ id: `jur_${Date.now()}`, ...newJurnal });
+                saveStateToLocalStorage();
+                renderJurnalTimeline();
+                showToast("Jurnal Mengajar disimpan (Mode Demo/Lokal)!", "success");
+            } else {
+                if (!currentUser) {
+                    showToast("Koneksi Cloud terputus. Gagal menyimpan.", "error");
+                    return;
+                }
+
+                try {
+                    const docRef = doc(db, 'artifacts', appId, 'public', 'data', 'jurnal', `jur_${Date.now()}`);
+                    await setDoc(docRef, newJurnal);
+                    showToast("Jurnal Mengajar berhasil disinkronkan ke Cloud!", "success");
+                } catch (err) {
+                    console.error("Firestore Save Error:", err);
+                    showToast("Gagal menyimpan ke Cloud database.", "error");
+                    return;
+                }
             }
 
-            try {
-                // Strict path format (RULE 1)
-                const docRef = doc(db, 'artifacts', appId, 'public', 'data', 'jurnal', `jur_${Date.now()}`);
-                await setDoc(docRef, {
-                    date: date,
-                    teacher: teacher,
-                    subject: subject,
-                    kelas: kelas,
-                    hours: hours,
-                    notes: notes,
-                    tasks: tasks || "Tidak ada tugas",
-                    students: studentRecords
-                });
-                showToast("Jurnal Mengajar berhasil disinkronkan ke Cloud!", "success");
-            } catch (err) {
-                console.error("Firestore Save Error:", err);
-                showToast("Gagal menyimpan ke Cloud database.", "error");
-                return;
-            }
-
-            // Clear inputs & Reset Counters
             document.getElementById("form-jurnal").reset();
             document.getElementById('jurnal-date').value = new Date().toISOString().split('T')[0];
             document.getElementById("jurnal-subject").innerHTML = `<option value="" disabled selected>Pilih Guru Terlebih Dahulu</option>`;
             
-            // Reset visual counter badges to 0
             document.getElementById("notes-counter").innerText = "0 / 300 karakter";
             document.getElementById("notes-counter").className = "text-[10px] text-slate-400 font-semibold bg-slate-100 px-2 py-0.5 rounded-full";
             document.getElementById("tasks-counter").innerText = "0 / 300 karakter";
@@ -1786,16 +1845,15 @@
                 </div>
             `;
 
-            // Redirect automatically to the rekap timeline so teachers can view results
             setTimeout(() => {
                 switchView("rekap-jurnal");
             }, 600);
         }
 
-        // Render Teacher's journal log chronologically (Client-side Sort/Filter - RULE 2)
         function renderJurnalTimeline() {
             const container = document.getElementById("jurnal-cards-container");
             const noMsg = document.getElementById("no-rekap-jurnal-msg");
+            if (!container) return;
             container.innerHTML = "";
 
             let recordsToRender = [...jurnalRecords];
@@ -1806,7 +1864,6 @@
                 return a.hours.localeCompare(b.hours);
             });
 
-            // Filter settings
             const classFilter = document.getElementById("rekap-jurnal-class-filter").value;
             const teacherSearch = document.getElementById("rekap-jurnal-teacher-search").value.trim().toLowerCase();
 
@@ -1910,7 +1967,6 @@
         /* ----------------------------------------------------
            PART 5: MASTER DATA MANAGEMENT (SAVES TO CLOUD)
            ---------------------------------------------------- */
-        
         function setSettingTab(tabName) {
             activeSettingTab = tabName;
             
@@ -1926,17 +1982,15 @@
             const panelKeamanan = document.getElementById("setting-keamanan-panel");
             const panelJam = document.getElementById("setting-jam-panel");
 
-            // Toggle Tabs Style
             const activeTabClass = "px-4 py-2.5 text-sm font-semibold border-b-2 border-indigo-600 text-indigo-700 transition";
             const inactiveTabClass = "px-4 py-2.5 text-sm font-medium border-b-2 border-transparent text-slate-500 hover:text-slate-800 transition";
 
-            tabKelas.className = tabName === 'kelas' ? activeTabClass : inactiveTabClass;
-            tabGuru.className = tabName === 'guru' ? activeTabClass : inactiveTabClass;
-            tabMurid.className = tabName === 'murid' ? activeTabClass : inactiveTabClass;
-            tabKeamanan.className = tabName === 'keamanan' ? activeTabClass : inactiveTabClass;
-            tabJam.className = tabName === 'jam' ? activeTabClass : inactiveTabClass;
+            if (tabKelas) tabKelas.className = tabName === 'kelas' ? activeTabClass : inactiveTabClass;
+            if (tabGuru) tabGuru.className = tabName === 'guru' ? activeTabClass : inactiveTabClass;
+            if (tabMurid) tabMurid.className = tabName === 'murid' ? activeTabClass : inactiveTabClass;
+            if (tabKeamanan) tabKeamanan.className = tabName === 'keamanan' ? activeTabClass : inactiveTabClass;
+            if (tabJam) tabJam.className = tabName === 'jam' ? activeTabClass : inactiveTabClass;
 
-            // Toggle Panels Display
             panelKelas.classList.add("hidden");
             panelGuru.classList.add("hidden");
             panelMurid.classList.add("hidden");
@@ -1963,9 +2017,9 @@
             }
         }
 
-        // Sub 1: Kelas & Walas Editor
         function renderSettingKelasTable() {
             const tbody = document.getElementById("setting-kelas-table-body");
+            if (!tbody) return;
             tbody.innerHTML = "";
 
             const classes = Object.keys(masterStudents).sort();
@@ -1976,7 +2030,7 @@
                 tr.innerHTML = `
                     <td class="px-6 py-4 font-bold text-slate-900">Kelas ${c}</td>
                     <td class="px-6 py-4 text-slate-700">
-                        <select onchange="updateClassWalas('${c}', this.value)" class="bg-slate-50 border border-slate-300 rounded px-2 py-1 text-sm outline-none focus:ring-1 focus:ring-indigo-500">
+                        <select id="select-walas-${c}" class="bg-slate-50 border border-slate-300 rounded px-2 py-1 text-sm outline-none focus:ring-1 focus:ring-indigo-500">
                             <option value="" disabled ${!masterClassWalas[c] ? 'selected' : ''}>Pilih Walas...</option>
                             ${Object.keys(masterTeacherSubjects).sort().map(t => `
                                 <option value="${t}" ${currentWalas === t ? 'selected' : ''}>${t}</option>
@@ -1990,6 +2044,13 @@
                     </td>
                 `;
                 tbody.appendChild(tr);
+
+                const selectEl = document.getElementById(`select-walas-${c}`);
+                if (selectEl) {
+                    selectEl.addEventListener('change', (e) => {
+                        updateClassWalas(c, e.target.value);
+                    });
+                }
             });
         }
 
@@ -2042,9 +2103,9 @@
             );
         }
 
-        // Sub 2: Guru & Mapel Editor
         function renderSettingTeachersList() {
             const listContainer = document.getElementById("setting-teachers-list");
+            if (!listContainer) return;
             listContainer.innerHTML = "";
 
             const teachers = Object.keys(masterTeacherSubjects).sort();
@@ -2056,14 +2117,22 @@
                     isSelected ? 'border-indigo-600 bg-indigo-50/50 font-semibold' : 'border-slate-200 hover:bg-slate-50'
                 }`;
                 
-                div.setAttribute("onclick", `selectTeacherForMapel('${t}')`);
+                div.onclick = () => { selectTeacherForMapel(t); };
                 div.innerHTML = `
                     <span class="text-sm text-slate-800 pr-2 truncate">${t}</span>
-                    <button onclick="event.stopPropagation(); deleteTeacher('${t}')" class="text-slate-400 hover:text-red-600 p-1 rounded-md transition" title="Hapus Guru">
+                    <button id="del-teacher-${t.replace(/\s+/g, '')}" class="text-slate-400 hover:text-red-600 p-1 rounded-md transition" title="Hapus Guru">
                         <i class="fa-regular fa-circle-xmark"></i>
                     </button>
                 `;
                 listContainer.appendChild(div);
+
+                const delBtn = document.getElementById(`del-teacher-${t.replace(/\s+/g, '')}`);
+                if (delBtn) {
+                    delBtn.onclick = (e) => {
+                        e.stopPropagation();
+                        deleteTeacher(t);
+                    };
+                }
             });
 
             renderTeacherSubjectsView();
@@ -2089,6 +2158,7 @@
 
         function renderTeacherSubjectsView() {
             const container = document.getElementById("selected-teacher-subjects-container");
+            if (!container) return;
             container.innerHTML = "";
 
             if (!selectedTeacherForMapel) {
@@ -2105,7 +2175,7 @@
             subjects.sort().forEach(sub => {
                 const span = document.createElement("span");
                 span.className = "inline-flex items-center gap-1.5 px-3 py-1.5 bg-slate-100 hover:bg-red-50 text-slate-700 hover:text-red-700 text-xs font-semibold rounded-lg border border-slate-200 hover:border-red-200 transition cursor-pointer";
-                span.setAttribute("onclick", `deleteSubject('${sub}')`);
+                span.onclick = () => { deleteSubject(sub); };
                 span.setAttribute("title", "Klik untuk menghapus mata pelajaran");
                 span.innerHTML = `
                     <span>${sub}</span>
@@ -2115,7 +2185,6 @@
             });
         }
 
-        // Tambah guru baru
         async function addNewTeacher() {
             const input = document.getElementById("new-teacher-name");
             const name = input.value.trim();
@@ -2211,11 +2280,12 @@
             );
         }
 
-        // Sub 3: Murid Editor (Dengan Fitur Input Sekaligus / Massal)
         function loadStudentsInSetting(kelas) {
             const grid = document.getElementById("setting-students-grid");
             const labelClass = document.getElementById("setting-current-class-label");
             const countLabel = document.getElementById("setting-student-count");
+
+            if (!grid || !labelClass || !countLabel) return;
 
             grid.innerHTML = "";
             labelClass.innerText = kelas;
@@ -2243,11 +2313,16 @@
                         <span class="text-xs bg-slate-200 text-slate-600 font-bold px-1.5 py-0.5 rounded">${index + 1}</span>
                         <span class="text-sm font-semibold text-slate-800 truncate">${student}</span>
                     </div>
-                    <button onclick="deleteStudent('${kelas}', '${student}')" class="text-slate-400 hover:text-red-500 p-1 transition" title="Hapus Siswa">
+                    <button id="del-student-${kelas}-${index}" class="text-slate-400 hover:text-red-500 p-1 transition" title="Hapus Siswa">
                         <i class="fa-regular fa-trash-can"></i>
                     </button>
                 `;
                 grid.appendChild(card);
+
+                const delBtn = document.getElementById(`del-student-${kelas}-${index}`);
+                if (delBtn) {
+                    delBtn.onclick = () => { deleteStudent(kelas, student); };
+                }
             });
         }
 
@@ -2298,7 +2373,7 @@
             await saveMasterDataToFirestore();
             loadStudentsInSetting(kelas);
             
-            textarea.value = ""; // Mengosongkan textarea setelah disimpan
+            textarea.value = "";
             
             if (addedCount > 0) {
                 let successMsg = `Berhasil menambahkan ${addedCount} siswa baru ke kelas ${kelas}!`;
@@ -2324,23 +2399,27 @@
             );
         }
 
-        // Sub 4: Jam Pelajaran Editor (NEW)
         function renderSettingJamTable() {
             const tbody = document.getElementById("setting-jam-table-body");
             if (!tbody) return;
             tbody.innerHTML = "";
 
-            masterTeachingHours.forEach(h => {
+            masterTeachingHours.forEach((h, index) => {
                 const tr = document.createElement("tr");
                 tr.innerHTML = `
                     <td class="px-6 py-4 font-semibold text-slate-900">${h}</td>
                     <td class="px-6 py-4 text-center">
-                        <button onclick="deleteTeachingHour('${h}')" class="text-red-500 hover:text-red-700 hover:bg-red-50 p-1.5 rounded-lg transition">
+                        <button id="del-jam-${index}" class="text-red-500 hover:text-red-700 hover:bg-red-50 p-1.5 rounded-lg transition">
                             <i class="fa-regular fa-trash-can"></i> Hapus
                         </button>
                     </td>
                 `;
                 tbody.appendChild(tr);
+
+                const delBtn = document.getElementById(`del-jam-${index}`);
+                if (delBtn) {
+                    delBtn.onclick = () => { deleteTeachingHour(h); };
+                }
             });
         }
 
@@ -2382,9 +2461,9 @@
             );
         }
 
-        // Open/Close Auth Modal
         function openAdminAuthModal() {
             const modal = document.getElementById("admin-auth-modal");
+            if (!modal) return;
             modal.classList.remove("hidden");
             setTimeout(() => {
                 modal.classList.remove("opacity-0");
@@ -2396,6 +2475,7 @@
 
         function closeAdminAuthModal() {
             const modal = document.getElementById("admin-auth-modal");
+            if (!modal) return;
             modal.classList.add("opacity-0");
             modal.querySelector(".transform").classList.remove("scale-100");
             modal.querySelector(".transform").classList.add("scale-95");
@@ -2405,7 +2485,6 @@
             }, 300);
         }
 
-        // Handle login verification
         function handleAdminLogin(event) {
             event.preventDefault();
             const inputVal = document.getElementById("admin-password-input").value;
@@ -2421,7 +2500,6 @@
             }
         }
 
-        // Sesi Lock / Log out Admin
         function logoutAdmin() {
             isAdminAuthenticated = false;
             updateSidebarLockUI();
@@ -2429,7 +2507,6 @@
             switchView('absensi-walas');
         }
 
-        // Update Lock indicator in left sidebar
         function updateSidebarLockUI() {
             const lockIcon = document.getElementById("sidebar-lock-icon");
             if (lockIcon) {
